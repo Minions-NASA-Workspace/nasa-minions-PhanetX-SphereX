@@ -302,12 +302,18 @@ def upload_timeline_assets(env_path, out_dir, seq_id, db_env, executable):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     prefix = f"combined/{out_dir.name}"
 
+    # Upload clean grayscale player PNGs (not the annotated Matplotlib diagnostic plots).
+    if (out_dir / "aligned_sequence.fits").is_file() and not (out_dir / "player").is_dir():
+        export_clean_player_pngs(out_dir)
+
     sql_lines = ["BEGIN;\n"]
     frame_urls = {}
     for fr in manifest["frames"]:
         idx = int(fr["frame_index"])
-        local_png = ROOT / fr["png"]
-        obj_path = f"{prefix}/{local_png.name}"
+        name = Path(fr["png"]).name
+        player_png = out_dir / "player" / name
+        local_png = player_png if player_png.is_file() else (ROOT / fr["png"])
+        obj_path = f"{prefix}/{name}"
         pub_url = upload_storage_object(base, key, bucket, obj_path, local_png, "image/png")
         frame_urls[idx] = pub_url
         fr["storage_url"] = pub_url
