@@ -386,3 +386,127 @@ kbd {
     min-width: 0;
   }
 }
+
+.planet-strip {
+  position: absolute;
+  left: 50%;
+  top: var(--space-3);
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgb(23 23 31 / 0.9);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+.planet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-hover) var(--ease-out);
+}
+.planet-chip:hover {
+  background: var(--surface-2);
+}
+.planet-chip.is-selected {
+  background: rgb(246 196 83 / 0.2);
+  color: #ffe39b;
+}
+.planet-chip__sym {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.planet-card {
+  width: min(330px, calc(100vw - 24px));
+}
+.planet-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.planet-card__epoch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.planet-epoch-btn {
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.planet-epoch-btn.is-on {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.planet-card__fact {
+  margin: 0;
+  color: var(--fg);
+}
+.planet-card__actions {
+  display: grid;
+  gap: var(--space-2);
+}
+.planet-card__jumper {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 3px;
+}
+.planet-jump-btn {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 14px;
+  cursor: pointer;
+}
+.planet-jump-btn:hover {
+  border-color: var(--line-strong);
+}
+.planet-jump-btn.is-selected {
+  border-color: #f6c453;
+  background: rgb(246 196 83 / 0.16);
+}
+@media (max-width: 1240px) {
+  .planet-card ~ .planet-strip,
+  .planet-strip {
+    max-width: calc(100vw - 380px);
+  }
+}
+@media (max-width: 820px) {
+  .planet-strip {
+    top: auto;
+    bottom: calc(var(--dock-h) + 2 * var(--space-3));
+    max-width: calc(100vw - 24px);
+  }
+  .planet-card {
+    right: var(--space-3);
+  }
+}

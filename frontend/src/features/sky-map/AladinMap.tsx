@@ -3,6 +3,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { config } from '../../app/config'
 import { api } from '../../shared/api'
 import { DR1_MAP_MJD, mapPosition } from '../../shared/config/epoch'
+import { computePlanetPositions, type PlanetSkyPosition } from '../../shared/config/planets'
 import { TARGETS, type TargetKey } from '../../shared/config/targets'
 import {
   gaiaUrl,
@@ -58,6 +59,7 @@ export interface SkyMapHandle {
   /** Illustrative diurnal motion: the view drifts in RA as if Earth were turning (sped up). */
   setSkyMotion: (on: boolean, degPerSecond?: number) => void
   setGaiaVisible: (visible: boolean, around?: { ra: number; dec: number }, targetKey?: TargetKey | null) => void
+  setPlanetsVisible: (visible: boolean, epochMjd?: number) => void
   zoomIn: () => void
   zoomOut: () => void
   getFovDeg: () => number | null
@@ -71,6 +73,7 @@ interface Props {
   onStatus?: (status: 'loading' | 'ready' | 'error', message?: string) => void
   onGaiaStatus?: (info: GaiaStatusInfo) => void
   onSourceSelected?: (s: SelectedGaiaSource) => void
+  onPlanetSelected?: (planet: PlanetSkyPosition) => void
   /** SPHEREx detector 1–6: the background shows that detector's middle wavelength. */
   detector?: number
   /** Active sky survey choice (`spherex` DR1 cube vs `wise` AllWISE infrared). */
@@ -190,6 +193,7 @@ export const AladinMap = forwardRef<SkyMapHandle, Props>(function AladinMap(
     onStatus,
     onGaiaStatus,
     onSourceSelected,
+    onPlanetSelected,
     detector = 6,
     backgroundMode = 'spherex',
     onSurvey,
@@ -201,6 +205,8 @@ export const AladinMap = forwardRef<SkyMapHandle, Props>(function AladinMap(
   const targetCatRef = useRef<AladinInstance>(null)
   const selectedCatRef = useRef<AladinInstance>(null)
   const gaiaCatRef = useRef<AladinInstance>(null)
+  const planetsCatRef = useRef<AladinInstance>(null)
+  const planetsDesiredRef = useRef<{ visible: boolean; epochMjd: number }>({ visible: true, epochMjd: DR1_MAP_MJD })
   const gaiaTokenRef = useRef<object | null>(null)
   const gaiaDesiredRef = useRef<{ around: { ra: number; dec: number }; targetKey: TargetKey | null } | null>(null)
   const gaiaCacheRef = useRef<Map<string, { stars: GaiaCatalogStar[]; source: 'sky_archive' | 'vizier' }>>(new Map())
@@ -214,6 +220,8 @@ export const AladinMap = forwardRef<SkyMapHandle, Props>(function AladinMap(
   onSelectRef.current = onTargetSelected
   const onSourceRef = useRef(onSourceSelected)
   onSourceRef.current = onSourceSelected
+  const onPlanetSelectedRef = useRef(onPlanetSelected)
+  onPlanetSelectedRef.current = onPlanetSelected
   const onGaiaStatusRef = useRef(onGaiaStatus)
   onGaiaStatusRef.current = onGaiaStatus
   const onSurveyRef = useRef(onSurvey)
@@ -282,6 +290,39 @@ export const AladinMap = forwardRef<SkyMapHandle, Props>(function AladinMap(
     },
     [],
   )
+
+  const drawPlanetsCatalog = useCallback((visible: boolean, epochMjd: number) => {
+    const a = aladinRef.current
+    if (!a) return
+    if (planetsCatRef.current) {
+      a.removeLayer?.(planetsCatRef.current)
+      planetsCatRef.current.hide?.()
+      planetsCatRef.current = null
+    }
+    if (!visible) return
+    const planets = computePlanetPositions(epochMjd).filter((p) => !p.isObserver)
+    const cat = A.catalog({
+      name: 'Solar System planets',
+      shape: 'circle',
+      sourceSize: 16,
+      color: '#F6C453',
+      displayLabel: true,
+      labelColumn: 'label',
+      labelColor: '#FFD980',
+      labelFont: '12px Andika, sans-serif',
+    })
+    cat.addSources(
+      planets.map((p) =>
+        A.source(p.ra, p.dec, {
+          label: `${p.symbol} ${p.name}`,
+          planetKey: p.key,
+          planet: p,
+        }),
+      ),
+    )
+    planetsCatRef.current = cat
+    a.addCatalog(cat)
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -357,15 +398,22 @@ export const AladinMap = forwardRef<SkyMapHandle, Props>(function AladinMap(
 
         // Markers at the stars' positions in the active background survey epoch (not J2000).
         syncTargetMarkers(survey.epochMjd, selectedKey)
+        if (planetsDesiredRef.current.visible) {
+          drawPlanetsCatalog(true, planetsDesiredRef.current.epochMjd)
+        }
 
         aladin.on('objectClicked', (obj: AladinInstance) => {
-          const key = obj?.data?.key as TargetKey | undefined
+          const d = obj?.data ?? {}
+          if (d.planetKey && d.planet) {
+            onPlanetSelectedRef.current?.(d.planet as PlanetSkyPosition)
+            return
+          }
+          const key = d.key as TargetKey | undefined
           if (key) {
             onSelectRef.current(key)
             return
           }
           if (obj && typeof obj.ra === 'number' && obj.catalog?.name === 'Gaia DR3') {
-            const d = obj.data ?? {}
             const g = Number(d.Gmag)
             const pmRa = d.pmRA != null && Number.isFinite(Number(d.pmRA)) ? Number(d.pmRA) : null
             const pmDec = d.pmDE != null && Number.isFinite(Number(d.pmDE)) ? Number(d.pmDE) : null
@@ -534,6 +582,11 @@ export const AladinMap = forwardRef<SkyMapHandle, Props>(function AladinMap(
             if (gaiaTokenRef.current === token) onGaiaStatusRef.current?.({ status: 'error' })
           })
       },
+      setPlanetsVisible(visible, epochMjd) {
+        const targetEpoch = epochMjd ?? surveyRef.current?.epochMjd ?? DR1_MAP_MJD
+        planetsDesiredRef.current = { visible, epochMjd: targetEpoch }
+        drawPlanetsCatalog(visible, targetEpoch)
+      },
       zoomIn() {
         const a = aladinRef.current
         if (!a) return
@@ -549,7 +602,7 @@ export const AladinMap = forwardRef<SkyMapHandle, Props>(function AladinMap(
         return Array.isArray(f) ? f[1] : null
       },
     }),
-    [drawGaiaCatalog],
+    [drawGaiaCatalog, drawPlanetsCatalog],
   )
 
   return (

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useReducedMotion } from 'motion/react'
-import { AlertTriangle, Eye, Grid3x3, HelpCircle, Layers, LocateFixed, Maximize2, Minimize2, Minus, Mountain, Orbit, Plus, Sparkles, X } from 'lucide-react'
+import { AlertTriangle, Eye, Globe2, Grid3x3, HelpCircle, Layers, LocateFixed, Maximize2, Minimize2, Minus, Mountain, Orbit, Plus, Sparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
 import { config, PATHS } from '../app/config'
@@ -15,6 +15,7 @@ import { useFrameSession } from '../features/blink/useFrameSession'
 import { readExperienceMode, writeExperienceMode, type ExperienceMode } from '../features/experience-mode/mode'
 import { AladinMap, SURVEY, type GaiaStatusInfo, type SelectedGaiaSource, type SkyMapHandle, type SurveyInfo } from '../features/sky-map/AladinMap'
 import { DR1_MAP_MJD, mapPosition } from '../shared/config/epoch'
+import { computePlanetPositions, currentMjd, type PlanetKey, type PlanetSkyPosition } from '../shared/config/planets'
 import { TargetPopup } from '../features/target-details/TargetPopup'
 import type { ViewerToggles } from '../features/target-details/ObservationViewer'
 import { TargetSearch } from '../features/target-search/TargetSearch'
@@ -38,6 +39,14 @@ function isInteractiveTarget(el: EventTarget | null): boolean {
   return !!t && !!t.closest('button, a, summary, [role="tab"], input, textarea, select')
 }
 
+function formatLightTime(minutes: number): string {
+  if (minutes < 0.05) return '0 min'
+  if (minutes < 60) return `${minutes.toFixed(1)} min light-time`
+  const h = Math.floor(minutes / 60)
+  const m = Math.round(minutes % 60)
+  return `${h}h ${m}m light-time`
+}
+
 export default function TheEyesPage() {
   const location = useLocation()
   const [, setSearchParams] = useSearchParams()
@@ -55,6 +64,9 @@ export default function TheEyesPage() {
   const [skyMotion, setSkyMotion] = useState(false)
   const [gaia, setGaia] = useState(false)
   const [gaiaStatus, setGaiaStatus] = useState<GaiaStatusInfo>({ status: 'idle' })
+  const [planets, setPlanets] = useState(true)
+  const [planetEpochMode, setPlanetEpochMode] = useState<'survey' | 'now'>('survey')
+  const [selectedPlanetKey, setSelectedPlanetKey] = useState<PlanetKey | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [help, setHelp] = useState(false)
   const [source, setSource] = useState<SelectedGaiaSource | null>(null)
@@ -253,6 +265,14 @@ export default function TheEyesPage() {
   )
   useEffect(() => () => window.clearTimeout(fovTimer.current), [])
 
+  const [liveMjd, setLiveMjd] = useState(() => currentMjd())
+  const activePlanetEpochMjd = planetEpochMode === 'now' ? liveMjd : (survey.epochMjd ?? DR1_MAP_MJD)
+  const planetPositions = useMemo(() => computePlanetPositions(activePlanetEpochMjd), [activePlanetEpochMjd])
+  const selectedPlanet = useMemo(
+    () => (selectedPlanetKey ? (planetPositions.find((p) => p.key === selectedPlanetKey) ?? null) : null),
+    [planetPositions, selectedPlanetKey],
+  )
+
   useEffect(() => {
     if (mapStatus.s === 'ready') mapRef.current?.setGridVisible(grid)
   }, [grid, mapStatus.s])
@@ -266,6 +286,23 @@ export default function TheEyesPage() {
     mapRef.current?.setGaiaVisible(gaia, mapCoords ?? undefined, target?.key ?? null)
     if (!gaia) setGaiaStatus({ status: 'idle' })
   }, [gaia, mapCoords, target?.key, mapStatus.s])
+
+  useEffect(() => {
+    if (mapStatus.s !== 'ready') return
+    mapRef.current?.setPlanetsVisible(planets, activePlanetEpochMjd)
+  }, [planets, activePlanetEpochMjd, mapStatus.s])
+
+  const focusPlanet = useCallback((p: PlanetSkyPosition) => {
+    setSource(null)
+    setSelectedPlanetKey(p.key)
+    setSkyMotion(false)
+    if (p.isObserver) {
+      setGround(true)
+      return
+    }
+    if (!planets) setPlanets(true)
+    mapRef.current?.focus(p.ra, p.dec, 28)
+  }, [planets])
 
   useEffect(() => {
     const onFs = () => setFullscreen(document.fullscreenElement === stageRef.current)
@@ -377,7 +414,13 @@ export default function TheEyesPage() {
           onGaiaStatus={setGaiaStatus}
           onSourceSelected={(s) => {
             close('navigation')
+            setSelectedPlanetKey(null)
             setSource(s)
+          }}
+          onPlanetSelected={(p) => {
+            close('navigation')
+            setSource(null)
+            setSelectedPlanetKey(p.key)
           }}
           detector={detector}
           backgroundMode={backgroundMode}
@@ -422,6 +465,162 @@ export default function TheEyesPage() {
               <X aria-hidden />
             </button>
           </div>
+        )}
+
+        {!popupOpen && !selectedPlanet && !embed && planets && mapStatus.s === 'ready' && (
+          <nav className="planet-strip" aria-label="Solar System planets">
+            {planetPositions.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className={`planet-chip${selectedPlanetKey === p.key ? ' is-selected' : ''}`}
+                aria-pressed={selectedPlanetKey === p.key}
+                title={p.isObserver ? 'Earth (observer beneath low-Earth orbit)' : `${p.name} · ${p.geoAu.toFixed(2)} AU from Earth`}
+                onClick={() => focusPlanet(p)}
+              >
+                <span className="planet-chip__sym" style={{ color: p.color }} aria-hidden>
+                  {p.symbol}
+                </span>
+                <span>{p.name}</span>
+              </button>
+            ))}
+          </nav>
+        )}
+
+        {selectedPlanet && (
+          <section className="source-card planet-card" aria-label="Solar System planet">
+            <div className="source-card__head">
+              <h2 className="source-card__title">
+                <span style={{ color: selectedPlanet.color }} aria-hidden>
+                  {selectedPlanet.symbol}{' '}
+                </span>
+                {selectedPlanet.name}
+              </h2>
+              <button type="button" className="icon-btn icon-btn--sm" aria-label="Close planet details" onClick={() => setSelectedPlanetKey(null)}>
+                <X aria-hidden />
+              </button>
+            </div>
+            <div className="planet-card__meta">
+              <span className="pill">{selectedPlanet.category}</span>
+              {!selectedPlanet.isObserver && (
+                <div className="planet-card__epoch" role="group" aria-label="Planet position epoch">
+                  <button
+                    type="button"
+                    className={`planet-epoch-btn${planetEpochMode === 'survey' ? ' is-on' : ''}`}
+                    aria-pressed={planetEpochMode === 'survey'}
+                    onClick={() => setPlanetEpochMode('survey')}
+                  >
+                    {survey.epochLabel ?? 'Survey'}
+                  </button>
+                  <button
+                    type="button"
+                    className={`planet-epoch-btn${planetEpochMode === 'now' ? ' is-on' : ''}`}
+                    aria-pressed={planetEpochMode === 'now'}
+                    onClick={() => {
+                      setLiveMjd(currentMjd())
+                      setPlanetEpochMode('now')
+                    }}
+                  >
+                    Today
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {experienceMode === 'explore' ? (
+              <>
+                <dl className="facts">
+                  <div>
+                    <dt>Distance from Earth</dt>
+                    <dd className="num">
+                      {selectedPlanet.isObserver
+                        ? '0 AU — SPHEREx flies ~650 km overhead'
+                        : `${selectedPlanet.geoAu.toFixed(2)} AU (${formatLightTime(selectedPlanet.lightTimeMin)})`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Distance from the Sun</dt>
+                    <dd className="num">{selectedPlanet.helioAu.toFixed(2)} AU</dd>
+                  </div>
+                </dl>
+                <p className="caption planet-card__fact">{selectedPlanet.funFact}</p>
+              </>
+            ) : (
+              <>
+                <dl className="facts">
+                  {selectedPlanet.isObserver ? (
+                    <>
+                      <div>
+                        <dt>Orbital radius (r)</dt>
+                        <dd className="num">{selectedPlanet.helioAu.toFixed(4)} AU</dd>
+                      </div>
+                      <div>
+                        <dt>Observer orbit</dt>
+                        <dd>~650 km Sun-synchronous LEO along the terminator</dd>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <dt>
+                          Apparent ICRS ({planetEpochMode === 'now' ? 'Live today' : (survey.epochLabel ?? `MJD ${DR1_MAP_MJD}`)})
+                        </dt>
+                        <dd className="num">
+                          {formatRaHms(selectedPlanet.ra)} {formatDecDms(selectedPlanet.dec)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Heliocentric r / Geocentric Δ</dt>
+                        <dd className="num">
+                          {selectedPlanet.helioAu.toFixed(3)} AU / {selectedPlanet.geoAu.toFixed(3)} AU
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Solar elongation · Light time</dt>
+                        <dd className="num">
+                          {selectedPlanet.elongationDeg.toFixed(1)}° · {formatLightTime(selectedPlanet.lightTimeMin)}
+                        </dd>
+                      </div>
+                    </>
+                  )}
+                </dl>
+                <p className="caption planet-card__fact">{selectedPlanet.spherexNote}</p>
+              </>
+            )}
+
+            <div className="planet-card__actions">
+              {selectedPlanet.isObserver ? (
+                <button type="button" className="btn btn-secondary" onClick={() => setGround((g) => !g)}>
+                  <Mountain aria-hidden /> {ground ? 'Hide Earth horizon' : 'Show Earth horizon'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    if (!planets) setPlanets(true)
+                    mapRef.current?.focus(selectedPlanet.ra, selectedPlanet.dec, 28)
+                  }}
+                >
+                  <LocateFixed aria-hidden /> Center on {selectedPlanet.name}
+                </button>
+              )}
+              <div className="planet-card__jumper" aria-label="Jump to another planet">
+                {planetPositions.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    className={`planet-jump-btn${p.key === selectedPlanet.key ? ' is-selected' : ''}`}
+                    title={p.name}
+                    aria-label={p.name}
+                    onClick={() => focusPlanet(p)}
+                  >
+                    <span style={{ color: p.color }}>{p.symbol}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
         )}
 
         {source && (
@@ -557,6 +756,20 @@ export default function TheEyesPage() {
           </button>
           <button type="button" className="dock__btn" aria-pressed={gaia} title="Gaia DR3 stars around the target" disabled={!coords} onClick={() => setGaia((g) => !g)}>
             <Sparkles aria-hidden /> <span>Gaia stars</span>
+          </button>
+          <button
+            type="button"
+            className="dock__btn"
+            aria-pressed={planets}
+            title={
+              experienceMode === 'explore'
+                ? 'Show or hide the 9 Solar System planets along the sky'
+                : 'Overlay Solar System planets along the ecliptic at the active epoch'
+            }
+            disabled={mapStatus.s !== 'ready'}
+            onClick={() => setPlanets((p) => !p)}
+          >
+            <Globe2 aria-hidden /> <span>Planets</span>
           </button>
           <span className="dock__sep" aria-hidden />
           <div className="dock__switch" role="group" aria-label="Sky background survey">

@@ -1,11 +1,11 @@
 import { useReducedMotion } from 'motion/react'
 import { ArrowRight, Globe2, Pause, Play, Sun } from 'lucide-react'
-import { lazy, Suspense, useCallback, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useRef, useState, type RefObject } from 'react'
 import { PATHS } from '../app/config'
 import { useRouteTransition } from '../features/route-transition/TransitionHost'
 import { webglAvailable } from '../features/earth-scene/webgl'
 import { StarfieldCanvas } from '../features/artwork/StarfieldCanvas'
-import type { SceneView } from '../features/earth-scene/EarthScene'
+import type { BodyName, SceneView } from '../features/earth-scene/EarthScene'
 import { NavDrawer, SiteFooter, SiteHeader } from '../shared/layout/Shell'
 import './where/where.css'
 
@@ -21,7 +21,27 @@ export default function WhereAreYouPage() {
   const sunRef = useRef<HTMLSpanElement>(null)
   const earthRef = useRef<HTMLSpanElement>(null)
   const spherexRef = useRef<HTMLSpanElement>(null)
-  const labels = { sun: sunRef, earth: earthRef, spherex: spherexRef }
+  const mercuryRef = useRef<HTMLSpanElement>(null)
+  const venusRef = useRef<HTMLSpanElement>(null)
+  const marsRef = useRef<HTMLSpanElement>(null)
+  const jupiterRef = useRef<HTMLSpanElement>(null)
+  const saturnRef = useRef<HTMLSpanElement>(null)
+  const uranusRef = useRef<HTMLSpanElement>(null)
+  const neptuneRef = useRef<HTMLSpanElement>(null)
+  const plutoRef = useRef<HTMLSpanElement>(null)
+  const labels: Partial<Record<BodyName, RefObject<HTMLSpanElement | null>>> = {
+    sun: sunRef,
+    earth: earthRef,
+    spherex: spherexRef,
+    mercury: mercuryRef,
+    venus: venusRef,
+    mars: marsRef,
+    jupiter: jupiterRef,
+    saturn: saturnRef,
+    uranus: uranusRef,
+    neptune: neptuneRef,
+    pluto: plutoRef,
+  }
   const [gl] = useState(webglAvailable)
   const { phase, launch } = useRouteTransition()
   const launching = phase === 'launching'
@@ -71,6 +91,30 @@ export default function WhereAreYouPage() {
                 <span ref={spherexRef} className="where__label where__label--craft" aria-hidden translate="no">
                   SPHEREx
                 </span>
+                <span ref={mercuryRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Mercury
+                </span>
+                <span ref={venusRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Venus
+                </span>
+                <span ref={marsRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Mars
+                </span>
+                <span ref={jupiterRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Jupiter
+                </span>
+                <span ref={saturnRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Saturn
+                </span>
+                <span ref={uranusRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Uranus
+                </span>
+                <span ref={neptuneRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Neptune
+                </span>
+                <span ref={plutoRef} className="where__label where__label--center where__label--planet" aria-hidden>
+                  Pluto
+                </span>
               </>
             ) : (
               <button type="button" className="where__static-btn" onClick={explore} aria-label="Explore the sky from Earth">
@@ -110,8 +154,9 @@ export default function WhereAreYouPage() {
               <span className="where__fact-dot" aria-hidden />
               {solar ? (
                 <span>
-                  Earth travels around the Sun once a year, and <strong translate="no">SPHEREx</strong> goes with it. Its orbit turns a
-                  little every day so it always rides the line between day and night — that is what a sun-synchronous orbit means.
+                  All nine Solar System worlds orbit the Sun at their own pace while Earth carries <strong translate="no">SPHEREx</strong>{' '}
+                  around once a year. Its orbit turns a little every day so it always rides the line between day and night — that is what a
+                  sun-synchronous orbit means.
                 </span>
               ) : (
                 <span>

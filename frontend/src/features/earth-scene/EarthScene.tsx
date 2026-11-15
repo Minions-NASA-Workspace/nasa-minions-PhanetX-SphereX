@@ -8,11 +8,14 @@ import {
   EARTH_YEAR_SECONDS,
   easeInOut,
   layout,
+  planetOrbitPosition,
+  SOLAR_EXTRA_PLANETS,
   sunlightDirection,
   SUN_POS_EARTH_VIEW,
   SUN_RADIUS,
   TRANSITION_SECONDS,
   type Layout,
+  type SolarExtraPlanet,
 } from './solarView'
 import { isOccluded } from './spherexOrbit'
 import { SpherexSatellite, type SceneLive } from './SpherexSatellite'
@@ -28,8 +31,21 @@ import { SpherexSatellite, type SceneLive } from './SpherexSatellite'
 const SECONDS_PER_TURN = 48
 const EARTH_RADIUS = 1
 
-export type BodyName = 'sun' | 'earth' | 'spherex'
+export type BodyName =
+  | 'sun'
+  | 'earth'
+  | 'spherex'
+  | 'mercury'
+  | 'venus'
+  | 'mars'
+  | 'jupiter'
+  | 'saturn'
+  | 'uranus'
+  | 'neptune'
+  | 'pluto'
 export type SceneView = 'earth' | 'solar'
+
+const EXTRA_PLANET_RADIUS = new Map<string, number>(SOLAR_EXTRA_PLANETS.map((p) => [p.key, p.bodyRadius]))
 
 interface Props {
   view: SceneView
@@ -210,6 +226,134 @@ function useEarthOrbitLine() {
   return line
 }
 
+function SolarLight({ live }: { live: Live }) {
+  const lightRef = useRef<THREE.PointLight>(null)
+  useFrame(() => {
+    if (!lightRef.current) return
+    lightRef.current.position.copy(live.layout.sunPos)
+    lightRef.current.intensity = 14 * live.layout.solar
+  })
+  return <pointLight ref={lightRef} position={SUN_POS_EARTH_VIEW} intensity={0} decay={1} distance={35} color="#fff2d6" />
+}
+
+function SolarPlanet({
+  planet,
+  seed,
+  live,
+  paused,
+  registry,
+}: {
+  planet: SolarExtraPlanet
+  seed: number
+  live: Live
+  paused: boolean
+  registry: Map<BodyName, THREE.Object3D>
+}) {
+  const orbitGroupRef = useRef<THREE.Group>(null)
+  const orbitLineRef = useRef<THREE.Line>(null)
+  const bodyGroupRef = useRef<THREE.Group>(null)
+  const spinMeshRef = useRef<THREE.Mesh>(null)
+  const bodyMatRef = useRef<THREE.MeshStandardMaterial>(null)
+  const ringMatRef = useRef<THREE.MeshStandardMaterial>(null)
+  const angleRef = useRef(planet.startAngle)
+  const tmpPos = useMemo(() => new THREE.Vector3(), [])
+  const surface = useMemo(
+    () => makeSurface(seed, planet.baseColor, planet.spotColors, planet.bands),
+    [seed, planet.baseColor, planet.spotColors, planet.bands],
+  )
+  const orbitLine = useMemo(() => {
+    const pts: THREE.Vector3[] = []
+    for (let k = 0; k <= 192; k++) {
+      const a = (k / 192) * Math.PI * 2
+      pts.push(planetOrbitPosition(planet.orbitRadius, a, planet.inclinationRad))
+    }
+    const material = new THREE.LineDashedMaterial({
+      color: planet.baseColor,
+      dashSize: 0.07,
+      gapSize: 0.06,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    })
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), material)
+    line.computeLineDistances()
+    return line
+  }, [planet.orbitRadius, planet.inclinationRad, planet.baseColor])
+
+  useEffect(
+    () => () => {
+      surface.dispose()
+      orbitLine.geometry.dispose()
+      ;(orbitLine.material as THREE.Material).dispose()
+    },
+    [surface, orbitLine],
+  )
+
+  const setBodyGroup = useCallback(
+    (g: THREE.Group | null) => {
+      bodyGroupRef.current = g
+      if (g) registry.set(planet.key, g)
+      else registry.delete(planet.key)
+    },
+    [planet.key, registry],
+  )
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.1)
+    const solar = live.layout.solar
+    const visible = solar > 0.01
+    if (!paused && live.t > 0) {
+      angleRef.current -= ((Math.PI * 2 * dt) / (EARTH_YEAR_SECONDS * planet.periodRatio)) * live.t
+    }
+    if (orbitGroupRef.current) {
+      orbitGroupRef.current.position.copy(live.layout.sunPos)
+      orbitGroupRef.current.visible = visible
+    }
+    if (orbitLineRef.current) {
+      ;(orbitLineRef.current.material as THREE.LineDashedMaterial).opacity = 0.28 * solar
+    }
+    if (bodyGroupRef.current) {
+      planetOrbitPosition(planet.orbitRadius, angleRef.current, planet.inclinationRad, tmpPos)
+      bodyGroupRef.current.position.copy(live.layout.sunPos).add(tmpPos)
+      bodyGroupRef.current.scale.setScalar(0.5 + 0.5 * solar)
+      bodyGroupRef.current.visible = visible
+    }
+    if (spinMeshRef.current && !paused) {
+      spinMeshRef.current.rotation.y += dt * 0.4
+    }
+    if (bodyMatRef.current) bodyMatRef.current.opacity = solar
+    if (ringMatRef.current) ringMatRef.current.opacity = 0.72 * solar
+  })
+
+  return (
+    <>
+      <group ref={orbitGroupRef} visible={false}>
+        <primitive ref={orbitLineRef} object={orbitLine} />
+      </group>
+      <group ref={setBodyGroup} visible={false}>
+        <mesh ref={spinMeshRef}>
+          <sphereGeometry args={[planet.bodyRadius, 36, 36]} />
+          <meshStandardMaterial ref={bodyMatRef} map={surface} roughness={0.85} metalness={0} transparent opacity={0} />
+        </mesh>
+        {planet.hasRing && (
+          <mesh rotation={[Math.PI / 2 - 0.36, 0.18, 0]}>
+            <ringGeometry args={[planet.bodyRadius * 1.38, planet.bodyRadius * 2.25, 64]} />
+            <meshStandardMaterial
+              ref={ringMatRef}
+              color="#d8c08a"
+              roughness={0.8}
+              metalness={0}
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0}
+            />
+          </mesh>
+        )}
+      </group>
+    </>
+  )
+}
+
 /**
  * Drives everything that depends on the view: transition progress, Earth's position on its orbit,
  * the Sun's position, sunlight direction, camera. Mounted first so it runs before the other frames.
@@ -316,7 +460,7 @@ function LabelTracker({
       let hidden =
         (name !== 'earth' && isOccluded(camera.position.clone().sub(live.layout.earthPos), world.clone().sub(live.layout.earthPos), earthR() * 1.02)) ||
         (name !== 'sun' && isOccluded(camera.position.clone().sub(live.layout.sunPos), world.clone().sub(live.layout.sunPos), sunR()))
-      if (name === 'earth' && live.layout.solar < 0.6) hidden = true
+      if (name !== 'sun' && name !== 'spherex' && live.layout.solar < 0.6) hidden = true
       v.copy(world).project(camera)
       let x = ((v.x + 1) / 2) * size.width
       let y = ((1 - v.y) / 2) * size.height
@@ -325,10 +469,10 @@ function LabelTracker({
         y -= 24
       } else {
         // Centred above the body, clear of its projected radius.
-        const r = name === 'sun' ? sunR() : earthR()
+        const r = name === 'sun' ? sunR() : name === 'earth' ? earthR() : (EXTRA_PLANET_RADIUS.get(name) ?? 0.12)
         edge.copy(world).addScaledVector(up, r).project(camera)
         const pr = Math.abs(((1 - edge.y) / 2) * size.height - y)
-        y -= pr + (name === 'sun' ? 30 : 22)
+        y -= pr + (name === 'sun' ? 30 : name === 'earth' ? 22 : 16)
       }
       el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`
       el.style.opacity = v.z < 1 && !hidden ? '1' : '0'
@@ -341,7 +485,7 @@ const ARIA: Record<SceneView, string> = {
   earth:
     'Earth turning in sunlight, with the SPHEREx telescope circling it over both poles along the line between day and night. Not to scale.',
   solar:
-    'The Sun at the centre with Earth travelling around it; SPHEREx keeps circling Earth, and its orbit turns through the year to stay on the line between day and night. Not to scale.',
+    'The Sun at the centre with Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune, and Pluto orbiting it; SPHEREx keeps circling Earth along the day–night line. Not to scale.',
 }
 
 export default function EarthScene(props: Props) {
@@ -398,6 +542,7 @@ export default function EarthScene(props: Props) {
       {/* Sunlight comes from the Sun's direction; the Director keeps it aimed at Earth. */}
       <directionalLight ref={dirLight} position={LIGHT_POS} intensity={2.8} color="#fff6e8" />
       <pointLight ref={pointLight} position={SUN_POS_EARTH_VIEW} intensity={6} distance={30} color="#ffd9a0" />
+      <SolarLight live={live} />
       <primitive object={orbitLine} />
       <group ref={setSunGroup} position={SUN_POS_EARTH_VIEW}>
         <Sun paused={still} onSunClick={props.onSunClick} onHover={props.onHover} />
@@ -408,6 +553,9 @@ export default function EarthScene(props: Props) {
         </Suspense>
         <SpherexSatellite live={live} paused={still} registry={registry as Map<string, THREE.Object3D>} />
       </group>
+      {SOLAR_EXTRA_PLANETS.map((planet, index) => (
+        <SolarPlanet key={planet.key} planet={planet} seed={101 + index * 17} live={live} paused={still} registry={registry} />
+      ))}
       <LabelTracker labels={props.labels} registry={registry} live={live} />
     </Canvas>
   )
